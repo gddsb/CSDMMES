@@ -21,6 +21,7 @@ const getStatusStyle = (status) => {
     case '开立': return { bg: '#e6f7ff', color: '#1890ff', cls: 'open' }
     case '下发': return { bg: '#fff7e6', color: '#fa8c16', cls: 'released' }
     case '开工': return { bg: '#f6ffed', color: '#52c41a', cls: 'started' }
+    case '部分完工': return { bg: '#fff1f0', color: '#fa541c', cls: 'partial' }
     case '完工': return { bg: '#f0f0f0', color: '#595959', cls: 'done' }
     case '关闭': return { bg: '#fff1f0', color: '#cf1322', cls: 'closed' }
     default: return { bg: '#f0f0f0', color: '#595959', cls: 'done' }
@@ -37,6 +38,7 @@ export default function OrderList() {
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
   const [hasMore, setHasMore] = useState(true)
+  const [syncing, setSyncing] = useState(false)
 
   const pageSize = 20
 
@@ -118,6 +120,45 @@ export default function OrderList() {
     }
   }
 
+  /** 订单同步（对齐 PC 端） */
+  const handleSync = async () => {
+    if (syncing) return
+    try {
+      setSyncing(true)
+      Toast.show({ icon: 'loading', content: '正在同步，请稍候…', duration: 0 })
+      const res = await api.post('/auto/sync-production-orders', {}, { timeout: 300000 })
+      Toast.clear()
+      const d = res.data || {}
+      const msg = d.message
+        || `同步完成：采集 ${d.collected ?? 0} 条，新增 ${d.inserted ?? 0}，更新 ${d.updated ?? 0}`
+      Toast.show({ icon: 'success', content: msg })
+      fetchList(1, true)
+    } catch (err) {
+      Toast.clear()
+      Toast.show({ icon: 'fail', content: err.message || '同步失败' })
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  /** 开工 / 补报剩余（对齐 PC 端策略） */
+  const handleStart = (order) => {
+    const planned = Number(order.planned_qty || 0)
+    const finished = Number(order.finished_qty || order.completed_qty || 0)
+    const isPartialDone = order.status === '完工' && finished < planned
+    if (isPartialDone) {
+      const remaining = planned - finished
+      Dialog.confirm({
+        title: '补报剩余',
+        content: `订单 ${order.order_no} 已部分完工，剩余 ${remaining} 件，确认继续报工？`,
+        confirmText: '继续报工',
+        onConfirm: () => navigate(`/mobile/reporting?orderId=${order.order_id}`),
+      })
+      return
+    }
+    navigate(`/mobile/reporting?orderId=${order.order_id}`)
+  }
+
   const renderStatusTag = (status) => {
     const s = getStatusStyle(status)
     return (
@@ -129,16 +170,35 @@ export default function OrderList() {
 
   return (
     <div>
-      {/* 顶部搜索栏 */}
+      {/* 顶部搜索栏 + 订单同步 */}
       <div className="mobile-search-bar">
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <input
             className="mobile-search-input"
             placeholder="搜索订单号 / 料号"
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+            style={{ flex: 1 }}
           />
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            style={{
+              flexShrink: 0,
+              padding: '6px 12px',
+              borderRadius: 6,
+              border: 'none',
+              background: syncing ? '#ccc' : '#1890ff',
+              color: '#fff',
+              fontSize: 12,
+              fontWeight: 500,
+              cursor: syncing ? 'not-allowed' : 'pointer',
+              minHeight: 32,
+            }}
+          >
+            {syncing ? '同步中…' : '订单同步'}
+          </button>
         </div>
       </div>
 
@@ -167,38 +227,81 @@ export default function OrderList() {
           <div className="mobile-empty">暂无订单数据</div>
         )}
 
-        {list.map(order => (
-          <div
-            key={order.order_id}
-            className="mobile-list-item"
-            onClick={() => navigate(`/mobile/orders/${order.order_id}`)}
-          >
-            <div className="mobile-list-item-header">
-              <div className="mobile-list-item-title">{order.order_no}</div>
-              {renderStatusTag(order.status)}
+        {list.map(order => {
+          const planned = Number(order.planned_qty || 0)
+          const finished = Number(order.finished_qty || order.completed_qty || 0)
+          const isPartialDone = order.status === '完工' && finished < planned
+          return (
+            <div
+              key={order.order_id}
+              className="mobile-list-item"
+              onClick={() => navigate(`/mobile/orders/${order.order_id}`)}
+            >
+              <div className="mobile-list-item-header">
+                <div className="mobile-list-item-title">{order.order_no}</div>
+                {renderStatusTag(isPartialDone ? '部分完工' : order.status)}
+              </div>
+              <div className="mobile-list-item-body">
+                <div className="mobile-flex-between" style={{ marginBottom: 4 }}>
+                  <span style={{ color: '#757575' }}>料号</span>
+                  <span>{order.material_code || '-'}</span>
+                </div>
+                <div className="mobile-flex-between" style={{ marginBottom: 4 }}>
+                  <span style={{ color: '#757575' }}>料品</span>
+                  <span style={{ maxWidth: '60%', textAlign: 'right' }}>
+                    {order.material_name || '-'}
+                  </span>
+                </div>
+                <div className="mobile-flex-between" style={{ marginBottom: 4 }}>
+                  <span style={{ color: '#757575' }}>
+                    {order.status === '开立' ? '计划数' : '完工 / 计划'}
+                  </span>
+                  <span style={{ fontWeight: 500 }}>
+                    {order.status === '开立' ? (
+                      <span style={{ color: '#212121' }}>{planned}</span>
+                    ) : (
+                      <>
+                        <span style={{ color: isPartialDone ? '#fa8c16' : '#52c41a' }}>{finished}</span>
+                        <span style={{ color: '#999' }}> / {planned}</span>
+                      </>
+                    )}
+                  </span>
+                </div>
+                <div className="mobile-flex-between" style={{ marginBottom: 8 }}>
+                  <span style={{ color: '#757575' }}>计划开始</span>
+                  <span>{formatDateTime(order.plan_start_time)}</span>
+                </div>
+                {/* 操作按钮（阻止冒泡） */}
+                <div
+                  className="mobile-order-actions"
+                  onClick={(e) => e.stopPropagation()}
+                  style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}
+                >
+                  {order.status === '开立' && (
+                    <button onClick={() => handleRelease(order)} className="mobile-action-btn primary">下发</button>
+                  )}
+                  {(order.status === '下发' || order.status === '开工') && (
+                    <>
+                      <button onClick={() => handleStart(order)} className="mobile-action-btn primary">
+                        {order.status === '开工' ? '继续报工' : '开工报工'}
+                      </button>
+                      <button onClick={() => handleClose(order)} className="mobile-action-btn danger">关闭</button>
+                    </>
+                  )}
+                  {isPartialDone && (
+                    <>
+                      <button onClick={() => handleStart(order)} className="mobile-action-btn warn">补报剩余</button>
+                      <button onClick={() => handleClose(order)} className="mobile-action-btn danger">关闭</button>
+                    </>
+                  )}
+                  {order.status === '完工' && !isPartialDone && (
+                    <button onClick={() => handleClose(order)} className="mobile-action-btn danger">关闭</button>
+                  )}
+                </div>
+              </div>
             </div>
-            <div className="mobile-list-item-body">
-              <div className="mobile-flex-between" style={{ marginBottom: 4 }}>
-                <span style={{ color: '#757575' }}>料号</span>
-                <span>{order.material_code || '-'}</span>
-              </div>
-              <div className="mobile-flex-between" style={{ marginBottom: 4 }}>
-                <span style={{ color: '#757575' }}>料品</span>
-                <span style={{ maxWidth: '60%', textAlign: 'right' }}>
-                  {order.material_name || '-'}
-                </span>
-              </div>
-              <div className="mobile-flex-between" style={{ marginBottom: 4 }}>
-                <span style={{ color: '#757575' }}>计划数</span>
-                <span style={{ fontWeight: 500, color: '#212121' }}>{order.planned_qty || 0}</span>
-              </div>
-              <div className="mobile-flex-between">
-                <span style={{ color: '#757575' }}>计划开始</span>
-                <span>{formatDateTime(order.plan_start_time)}</span>
-              </div>
-            </div>
-          </div>
-        ))}
+          )
+        })}
 
         <InfiniteScroll loadMore={loadMore} hasMore={hasMore} />
         </PullToRefresh>

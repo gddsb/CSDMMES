@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { Toast, InfiniteScroll, PullToRefresh } from 'antd-mobile'
 import api from '../../../utils/api'
 import { formatDateTime } from '../../../utils'
@@ -13,12 +13,15 @@ const STATUS_FILTERS = [
 
 export default function ReportList() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const [searchParams] = useSearchParams()
   const [list, setList] = useState([])
   const [loading, setLoading] = useState(false)
   const [keyword, setKeyword] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [page, setPage] = useState(1)
   const [hasMore, setHasMore] = useState(true)
+  const [autoJumpDone, setAutoJumpDone] = useState(false)
 
   const pageSize = 20
 
@@ -52,6 +55,63 @@ export default function ReportList() {
   useEffect(() => {
     fetchList(1, true)
   }, [fetchList])
+
+  // ========== 智能路由 ==========
+  // 1) URL 带 orderId → 自动创建报工单并进入
+  // 2) 无参数但只有 1 条开工报工单 → 自动选中
+  useEffect(() => {
+    if (autoJumpDone) return
+    let cancelled = false
+
+    const run = async () => {
+      const urlOrderId = searchParams.get('orderId')
+
+      // 情况 1: URL 带 orderId → 创建报工单
+      if (urlOrderId) {
+        setAutoJumpDone(true)
+        try {
+          Toast.show({ icon: 'loading', content: '正在创建报工单…', duration: 0 })
+          const res = await api.post('/production/report-orders', {
+            order_id: urlOrderId,
+          })
+          Toast.clear()
+          const newReportId = res.data?.report_order_id || res.data?.id
+          if (newReportId) {
+            navigate(`/mobile/reporting/${newReportId}`, { replace: true })
+          } else {
+            Toast.show({ icon: 'fail', content: res.message || '创建报工单失败' })
+          }
+        } catch (err) {
+          Toast.clear()
+          Toast.show({ icon: 'fail', content: err.message || '创建报工单失败' })
+        }
+        return
+      }
+
+      // 情况 2: 列表加载后自动选中唯一的开工报工单
+      // 等 fetchList 完成（通过轮询 list 状态）
+      const check = setInterval(() => {
+        if (cancelled) { clearInterval(check); return }
+        setList(curList => {
+          if (curList.length === 0) return curList
+          clearInterval(check)
+          setAutoJumpDone(true)
+          const started = curList.filter(r => r.status === 0 || r.status === '0' || r.status === '开工')
+          if (started.length === 1) {
+            navigate(`/mobile/reporting/${started[0].report_order_id}`, { replace: true })
+          }
+          return curList
+        })
+      }, 300)
+
+      // 超时保护：3s 后停止检测
+      setTimeout(() => { if (!cancelled) { clearInterval(check); setAutoJumpDone(true) } }, 3000)
+    }
+
+    run()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const loadMore = async () => {
     if (loading || !hasMore) return

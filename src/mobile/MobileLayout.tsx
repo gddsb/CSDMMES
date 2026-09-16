@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
-import { TabBar, Badge, Avatar } from 'antd-mobile'
+import { TabBar, Badge, Avatar, ActionSheet } from 'antd-mobile'
 import {
   AppOutline,
   UnorderedListOutline,
@@ -10,6 +10,7 @@ import {
   AddOutline,
   CheckOutline,
   BellOutline,
+  EditSOutline,
 } from 'antd-mobile-icons'
 import { useApp } from '../contexts/AppContext'
 import { useTodoStats } from '../hooks/useTodoStats'
@@ -19,11 +20,17 @@ import './mobile.css'
 const SYSTEM_VERSION = 'V1.0.1.722'
 
 const tabs = [
-  { key: '/mobile/bigscreen', title: '看板', icon: <UnorderedListOutline /> },
-  { key: '/mobile/device', title: '设备', icon: <SetOutline /> },
   { key: '/mobile/home', title: '首页', icon: <AppOutline /> },
+  { key: '__production__', title: '生产', icon: <EditSOutline /> },
+  { key: '/mobile/device', title: '设备', icon: <SetOutline /> },
   { key: '/mobile/messages', title: '消息', icon: <MessageOutline /> },
   { key: '/mobile/profile', title: '我的', icon: <UserOutline /> },
+]
+
+/** "生产"二级菜单 */
+const PRODUCTION_ITEMS = [
+  { text: '📋 生产订单', key: 'orders', route: '/mobile/orders' },
+  { text: '🏭 移动报工', key: 'reporting', route: '/mobile/reporting' },
 ]
 
 const DEVICE_TYPES = [
@@ -54,7 +61,13 @@ export default function MobileLayout() {
   }, [])
 
   useEffect(() => {
-    const matched = tabs.find(t => location.pathname === t.key || location.pathname.startsWith(t.key + '/'))
+    const path = location.pathname
+    // "生产"家族路径高亮
+    if (path === '/mobile/orders' || path === '/mobile/reporting') {
+      setActiveKey('__production__')
+      return
+    }
+    const matched = tabs.find(t => t.key === path || path.startsWith(t.key + '/'))
     if (matched) setActiveKey(matched.key)
   }, [location.pathname])
 
@@ -63,6 +76,21 @@ export default function MobileLayout() {
   }, [systemConfig.system_name, loadSystemConfig])
 
   const handleTabChange = (key) => {
+    if (key === '__production__') {
+      // 点击"生产"Tab → 弹出二级菜单
+      ActionSheet.show({
+        actions: PRODUCTION_ITEMS.map(it => ({ text: it.text, key: it.key })),
+        cancelText: '取消',
+        onAction: (action) => {
+          const target = PRODUCTION_ITEMS.find(it => it.key === action.key)
+          if (target) {
+            setActiveKey('__production__')
+            navigate(target.route)
+          }
+        },
+      })
+      return
+    }
     setActiveKey(key)
     navigate(key)
   }

@@ -99,3 +99,45 @@
   text-align: center;
   padding: 0 3px;
 }
+
+/* 九宫格菜单网格 */
+.mobile-menu-grid {
+  display: grid;
+  gap: 10px;
+  padding: 4px;
+}
+
+.mobile-menu-item {
+  background: #fff;
+  border-radius: 10px;
+  padding: 14px 6px 12px;
+  text-align: center;
+  border: 1px solid #f0f0f0;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.mobile-menu-item:active {
+  transform: scale(0.96);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.mobile-menu-item.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.mobile-menu-icon {
+  font-size: 28px;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mobile-menu-name {
+  font-size: 12px;
+  color: #333;
+  font-weight: 500;
+  line-height: 1.2;
+}
